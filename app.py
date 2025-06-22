@@ -4,35 +4,48 @@ import torch.nn as nn
 import numpy as np
 import torchvision.utils as vutils
 
-# --- 1. Model Architecture (Must be identical to the training script) ---
+# --- 1. Model Architecture (Corrected to match the training script) ---
 
-# Parameters (should match the training script)
+# Parameters (must match the training script)
 LATENT_DIM = 100
 N_CLASSES = 10
-IMG_SHAPE = (1, 28, 28)
 EMBEDDING_DIM = 50
 
-# Define the Generator class again
+# --- THIS IS THE CORRECT GENERATOR CLASS FROM YOUR TRAINING SCRIPT ---
+# The original class in your app.py was a simple linear model, while your
+# trained weights belong to this convolutional (DCGAN) model. This mismatch
+# was the cause of the error.
 class Generator(nn.Module):
+    """
+    Conditional DCGAN Generator.
+    """
     def __init__(self):
         super(Generator, self).__init__()
         self.label_embedding = nn.Embedding(N_CLASSES, EMBEDDING_DIM)
-        self.model = nn.Sequential(
-            nn.Linear(LATENT_DIM + EMBEDDING_DIM, 256),
+        self.latent_dim = LATENT_DIM
+
+        self.init_size = 7 # We will start with a 7x7 activation and upsample
+        self.l1 = nn.Sequential(nn.Linear(self.latent_dim + EMBEDDING_DIM, 128 * self.init_size ** 2))
+
+        self.conv_blocks = nn.Sequential(
+            nn.BatchNorm2d(128),
+            nn.Upsample(scale_factor=2), # Upsample to 14x14
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128, 0.8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(256, 512),
+            nn.Upsample(scale_factor=2), # Upsample to 28x28
+            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64, 0.8),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 1024),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(1024, int(np.prod(IMG_SHAPE))),
-            nn.Tanh()
+            nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1),
+            nn.Tanh(),
         )
 
     def forward(self, noise, labels):
-        label_embedding = self.label_embedding(labels)
-        gen_input = torch.cat((label_embedding, noise), -1)
-        img = self.model(gen_input)
-        img = img.view(img.size(0), *IMG_SHAPE)
+        gen_input = torch.cat((self.label_embedding(labels), noise), -1)
+        out = self.l1(gen_input)
+        out = out.view(out.shape[0], 128, self.init_size, self.init_size)
+        img = self.conv_blocks(out)
         return img
 
 # --- 2. Load the Trained Model ---
@@ -66,7 +79,7 @@ col1, col2 = st.columns([1, 3])
 with col1:
     # User selects which digit to generate
     selected_digit = st.selectbox("Select a digit to generate:", list(range(10)))
-    
+
     # Generate button
     generate_button = st.button("Generate Images", type="primary")
 
@@ -74,21 +87,21 @@ with col2:
     if generate_button:
         # Generate 5 images
         num_images = 5
-        
+
         # Prepare noise and labels
         with torch.no_grad(): # No need to track gradients
             noise = torch.randn(num_images, LATENT_DIM, device=device)
             labels = torch.full((num_images,), selected_digit, dtype=torch.long, device=device)
-            
+
             # Generate images
             generated_images = generator(noise, labels)
-            
+
             # Un-normalize the images from [-1, 1] to [0, 1] for display
             generated_images = generated_images * 0.5 + 0.5
-            
+
             # Create a grid of images
             grid = vutils.make_grid(generated_images, nrow=5, padding=2, normalize=True)
-            
+
             # Display the grid
             st.image(grid.permute(1, 2, 0).numpy(), caption=f"Generated Images for Digit: {selected_digit}")
     else:
